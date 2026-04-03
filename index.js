@@ -18,7 +18,6 @@ const path = require('path');
 const Trie = require('./trie');
 const { log } = require("node:console");
 const Group = require("./models/Group");
-
 const trie = new Trie()
 const suggestedWord = path.resolve(__dirname, './suggested.json')
 fs.readFile(suggestedWord, 'utf-8', (err, data) => {
@@ -36,16 +35,35 @@ fs.readFile(suggestedWord, 'utf-8', (err, data) => {
   words.forEach(word => trie.insert(word))
 })
 
-app.use(cors({
-  // origin: process.env.NODE_ENV === 'development'
-  //     ? 'https://merchantcoin.shop' // Vite dev server
-  //     : 'app://./' ,// Electron production
+// app.use(cors({
+//   // origin: process.env.NODE_ENV === 'development'
+//   //     ? 'https://merchantcoin.shop' // Vite dev server
+//   //     : 'app://./' ,// Electron production
 
-  // curl -i -X OPTIONS http://localhost:3000/ -H "Origin: https://merchantcoin.shop
-  origin: ['https://merchantcoin.shop'],
-  methods: ['GET', 'POST', 'OPTIONS'],
-  credentials: true
+//   // curl -i -X OPTIONS http://localhost:3000/ -H "Origin: https://merchantcoin.shop
+//   origin: ['https://merchantcoin.shop'],
+//   methods: ['GET', 'POST', 'OPTIONS'],
+//   credentials: true
+// }));
+
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
+app.use(cors({
+  origin: (origin, callback) => {
+    callback(null, true); 
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// handle preflight
+app.options('*', cors());
 
 
 // JWT_SECRET
@@ -658,6 +676,8 @@ app.get('/groups/:groupId/messages', authMiddleware, async (req, res) => {
   }
 });
 
+
+
 const server = createServer(app);
 // const io = new Server(server, {
 //   cors: {
@@ -667,9 +687,17 @@ const server = createServer(app);
 //   }
 // });
 
+// const io = new Server(server, {
+//   cors: {
+//     origin: ['https://merchantcoin.shop'],
+//     methods: ["GET", "POST"],
+//     credentials: true
+//   }
+// });
+
 const io = new Server(server, {
   cors: {
-    origin: ['https://merchantcoin.shop'],
+    origin: "*", // socket allows this
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -1194,6 +1222,8 @@ function createRoomName(userId1, userId2) {
   return [userId1, userId2].sort().join('_');
 }
 
-server.listen(8000, () => {
-  console.log('Server running at http://localhost:8000');
+const PORT = process.env.PORT || 8000;
+
+server.listen(PORT, () => {
+  console.log("Server running on port", PORT);
 });
