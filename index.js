@@ -1,6 +1,6 @@
 require("dotenv").config();
 const express = require('express');
-const { User, Chat } = require('./models/User');
+const { User, Chat, Broadcast, BroadcastSeen } = require('./models/User');
 const { createServer } = require('node:http');
 const { Server } = require('socket.io');
 const cors = require('cors');
@@ -18,6 +18,7 @@ const path = require('path');
 const Trie = require('./trie');
 const { log } = require("node:console");
 const Group = require("./models/Group");
+
 const trie = new Trie()
 const suggestedWord = path.resolve(__dirname, './suggested.json')
 fs.readFile(suggestedWord, 'utf-8', (err, data) => {
@@ -41,7 +42,7 @@ app.use(cors({
   //     : 'app://./' ,// Electron production
 
   // curl -i -X OPTIONS http://localhost:3000/ -H "Origin: http://localhost:5173
-  origin: ['https://meetcode-phi.vercel.app'],
+  origin: ['http://localhost:5173'],
   methods: ['GET', 'POST', 'OPTIONS'],
   credentials: true
 }));
@@ -95,8 +96,11 @@ app.get('/api/me', authMiddleware, async (req, res) => {
     const user = await User.findById(req.user.userId).populate(
       'friendRequestsReceived',
       'name picture _id',
-    );
+    ).lean();
     if (!user) return res.status(404).json({ message: 'User not found' });
+
+    user.inviteNumber = user.inviteNumber;
+    user.requestCount = user.friendRequestsReceived.length;
     res.json({ user });
   } catch (err) {
     res.status(500).json({ message: 'Error fetching user', error: err.message });
@@ -160,11 +164,19 @@ app.post('/', async (req, res) => {
     // console.log("✅ Token verified:", payload);
     let user = await User.findOne({ googleId: payload.sub });
     if (!user) {
+      let code;
+      let exists = true;
+
+      while (exists) {
+        code = Math.floor(1000000000 + Math.random() * 9000000000).toString();
+        exists = await User.findOne({ inviteNumber: code });
+      }
       user = await User.create({
         googleId: payload.sub,
         email: payload.email,
         name: payload.name,
         picture: payload.picture,
+        inviteNumber: code
       });
     }
     const appToken = jwt.sign({
@@ -211,45 +223,61 @@ app.post('/', async (req, res) => {
  * @returns {void} Redirects to /chats on success or duplicate, 400/404 on error.
  */
 app.get('/frnd-req/:senderId', authMiddleware, async (req, res) => {
-  const receiverId = req.user.userId;         // Authenticated user (e.g. Rahul)
-  const senderId = req.params.senderId;       // ID in the URL (e.g. Vikas)
+  try {
+    const receiverId = req.user.userId;
+    const senderId = req.params.senderId;
 
-  if (!mongoose.isValidObjectId(senderId)) {
-    return res.status(400).json({ error: 'Invalid sender ID' });
-  }
+    let sender = null;
 
-  if (receiverId === senderId) {
-    return res.status(400).json({ error: "You can't send a request to yourself." });
-  }
+    //  Try ObjectId first
+    if (mongoose.isValidObjectId(senderId)) {
+      sender = await User.findById(senderId);
+    }
 
-  const sender = await User.findById(senderId);
-  const receiver = await User.findById(receiverId);
+    //  If not found → try inviteNumber
+    if (!sender) {
+      sender = await User.findOne({ inviteNumber: senderId });
+    }
 
-  if (!sender || !receiver) {
-    return res.status(404).json({ error: 'User not found' });
-  }
+    if (!sender) {
+      return res.status(404).json({ error: 'User not found' });
+    }
 
-  // Check if already friends or already sent
-  if (
-    receiver.friendRequestsReceived.includes(senderId) ||
-    receiver.friends.includes(senderId)
-  ) {
+    const receiver = await User.findById(receiverId);
+
+    if (!receiver) {
+      return res.status(404).json({ error: 'Receiver not found' });
+    }
+
+    //  prevent self request
+    if (receiverId === sender._id.toString()) {
+      return res.status(400).json({ error: "You can't send a request to yourself." });
+    }
+
+    //  already sent / already friends
+    if (
+      receiver.friendRequestsReceived.includes(sender._id) ||
+      receiver.friends.includes(sender._id)
+    ) {
+      // return res.redirect('http://localhost:5173/chats');
+      return res.json({ success: true, message: "Request sent" });
+    }
+
+    //  ADD REQUEST
+    receiver.friendRequestsReceived.push(sender._id);
+    sender.friendRequestsSent.push(receiver._id);
+
+    await receiver.save();
+    await sender.save();
+
     // return res.redirect('http://localhost:5173/chats');
-    return res.redirect('https://meetcode-phi.vercel.app/chats');
+    return res.json({ success: true, message: "Request sent" });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Something went wrong' });
   }
-
-  // Add friend request
-  receiver.friendRequestsReceived.push(senderId);
-  sender.friendRequestsSent.push(receiverId);
-
-  await receiver.save();
-  await sender.save();
-
-  // return res.redirect('http://localhost:5173/chats');
-  return res.redirect('https://meetcode-phi.vercel.app');
 });
-
-
 
 
 /**
@@ -542,6 +570,32 @@ app.get('/chats/:chatId/messages', authMiddleware, async (req, res) => {
   }
 });
 
+/** */
+app.get('/broadcasts', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const broadcasts = await Broadcast.find({ sender: userId })
+      .sort({ createdAt: -1 })
+      .select("text seenCount recipients createdAt") 
+      .lean();
+
+    const result = broadcasts.map((b) => ({
+      _id: b._id,
+      text: b.text,
+      seenCount: b.seenCount,
+      totalRecipients: b.recipients.length, 
+      createdAt: b.createdAt
+    }));
+
+    res.json({ broadcasts: result });
+
+  } catch (err) {
+    console.error("Error fetching broadcasts:", err);
+    res.status(500).json({ message: "Failed to fetch broadcasts" });
+  }
+});
+
 
 app.get('/groups', authMiddleware, async (req, res) => {
   try {
@@ -614,7 +668,7 @@ const server = createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: ['https://meetcode-phi.vercel.app'],
+    origin: ['http://localhost:5173'],
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -975,6 +1029,147 @@ ConnectionSocket.on("react_group_message", async ({ messageId, emoji, userId }) 
     ConnectionSocket.on('disconnect', () => {
       console.log(`❌ Client disconnected: ${ConnectionSocket.id}`);
     });
+
+
+
+ConnectionSocket.on("send_broadcast", async ({ recipients, text }) => {
+  try {
+    const sender = await User.findById(userId);
+
+    const validRecipients = recipients.filter((id) =>
+      sender.friends.some((f) => f.toString() === id)
+    );
+
+    if (validRecipients.length === 0) {
+      return ConnectionSocket.emit("error", {
+        message: "No valid friends selected",
+      });
+    }
+
+    //  1. CREATE BROADCAST
+    const broadcast = await Broadcast.create({
+      sender: userId,
+      text,
+      recipients: validRecipients
+    });
+
+    //  2. CREATE TRACKING (FIXED VARIABLE NAME)
+    const seenDocs = validRecipients.map((recipientId) => ({
+      broadcastId: broadcast._id,
+      userId: recipientId,
+      seen: false
+    }));
+
+    await BroadcastSeen.insertMany(seenDocs);
+
+    //  3. SEND TO CHAT
+    for (const to of validRecipients) {
+      const room = createRoomName(userId, to);
+
+      const message = {
+        from: userId,
+        to,
+        text,
+        timestamp: new Date().toISOString(),
+        isBroadcast: true,
+        broadcastId: broadcast._id
+      };
+
+      io.to(room).emit("receive_message", message);
+
+      let chat = await Chat.findOne({
+        participants: { $all: [userId, to], $size: 2 },
+      });
+
+      if (!chat) {
+        chat = new Chat({
+          participants: [userId, to],
+          messages: [],
+        });
+      }
+
+      chat.messages.push({
+        sender: userId,
+        text,
+        timestamp: new Date(),
+        status: "sent",
+        isBroadcast: true,
+        broadcastId: broadcast._id
+      });
+
+      chat.lastMessageAt = new Date();
+      await chat.save();
+    }
+
+  } catch (err) {
+    console.error("Broadcast error:", err);
+    ConnectionSocket.emit("error", {
+      message: "Broadcast failed",
+    });
+  }
+});
+ConnectionSocket.on("broadcast_seen", async ({ broadcastId }) => {
+  try {
+    const currentUserId = userId;
+
+    console.log("👁 seen request:", broadcastId, currentUserId);
+
+    const already = await BroadcastSeen.findOne({
+      broadcastId: new mongoose.Types.ObjectId(broadcastId),
+      userId: new mongoose.Types.ObjectId(currentUserId)
+    });
+
+    if (!already) {
+      console.log("❌ No record found in BroadcastSeen");
+      return;
+    }
+
+    if (already.seen) {
+      console.log("⚠️ Already seen");
+      return;
+    }
+
+    await BroadcastSeen.updateOne(
+      {
+        broadcastId: new mongoose.Types.ObjectId(broadcastId),
+        userId: new mongoose.Types.ObjectId(currentUserId)
+      },
+      {
+        seen: true,
+        seenAt: new Date()
+      }
+    );
+
+    const updated = await Broadcast.findByIdAndUpdate(
+      broadcastId,
+      { $inc: { seenCount: 1 } },
+      { new: true }
+    );
+
+    console.log("✅ Seen updated");
+
+    const senderId = updated.sender.toString();
+
+    let senderSocketId = null;
+
+    for (let [socketId, uid] of onlineUsers.entries()) {
+      if (uid === senderId) {
+        senderSocketId = socketId;
+        break;
+      }
+    }
+
+    if (senderSocketId) {
+      io.to(senderSocketId).emit("broadcast_seen_update", {
+        broadcastId,
+        seenCount: updated.seenCount
+      });
+    }
+
+  } catch (err) {
+    console.error("broadcast_seen error:", err);
+  }
+});
   } catch (error) {
     console.error('JWT Error:', error);
     ConnectionSocket.disconnect(true);
