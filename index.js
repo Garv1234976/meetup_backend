@@ -36,17 +36,28 @@ fs.readFile(suggestedWord, 'utf-8', (err, data) => {
   words.forEach(word => trie.insert(word))
 })
 
-app.use(cors({
-  // origin: process.env.NODE_ENV === 'development'
-  //     ? 'http://localhost:5173' // Vite dev server
-  //     : 'app://./' ,// Electron production
+// app.use(cors({
+//   // origin: process.env.NODE_ENV === 'development'
+//   //     ? 'https://merchantcoin.shop' // Vite dev server
+//   //     : 'app://./' ,// Electron production
 
-  // curl -i -X OPTIONS http://localhost:3000/ -H "Origin: http://localhost:5173
-  origin: ['http://localhost:5173'],
-  methods: ['GET', 'POST', 'OPTIONS'],
-  credentials: true
+//   // curl -i -X OPTIONS http://localhost:3000/ -H "Origin: https://merchantcoin.shop
+//   origin: ['https://merchantcoin.shop'],
+//   methods: ['GET', 'POST', 'OPTIONS'],
+//   credentials: true
+// }));
+
+app.use(cors({
+  origin: (origin, callback) => {
+    callback(null, true); // allow ALL origins
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
+// handle preflight
+app.options('*', cors());
 
 // JWT_SECRET
 const Jwt_Token = process.env.JWT_SECRET
@@ -215,7 +226,7 @@ app.post('/', async (req, res) => {
  *   404: User not found
  *
  * Success:
- *   Redirects to /chats (http://localhost:5173/chats) after sending or if already sent/friends.
+ *   Redirects to /chats (https://merchantcoin.shop/chats) after sending or if already sent/friends.
  *
  * @route GET /frnd-req/:senderId
  * @middleware authMiddleware
@@ -260,7 +271,7 @@ app.get('/frnd-req/:senderId', authMiddleware, async (req, res) => {
       receiver.friendRequestsReceived.includes(sender._id) ||
       receiver.friends.includes(sender._id)
     ) {
-      // return res.redirect('http://localhost:5173/chats');
+      // return res.redirect('https://merchantcoin.shop/chats');
       return res.json({ success: true, message: "Request sent" });
     }
 
@@ -271,7 +282,7 @@ app.get('/frnd-req/:senderId', authMiddleware, async (req, res) => {
     await receiver.save();
     await sender.save();
 
-    // return res.redirect('http://localhost:5173/chats');
+    // return res.redirect('https://merchantcoin.shop/chats');
     return res.json({ success: true, message: "Request sent" });
 
   } catch (err) {
@@ -661,7 +672,15 @@ app.get('/groups/:groupId/messages', authMiddleware, async (req, res) => {
 const server = createServer(app);
 // const io = new Server(server, {
 //   cors: {
-//     origin: ['http://localhost:5173', 'http://localhost:3000'],
+//     origin: ['https://merchantcoin.shop', 'http://localhost:3000'],
+//     methods: ["GET", "POST"],
+//     credentials: true
+//   }
+// });
+
+// const io = new Server(server, {
+//   cors: {
+//     origin: ['https://merchantcoin.shop'],
 //     methods: ["GET", "POST"],
 //     credentials: true
 //   }
@@ -669,7 +688,7 @@ const server = createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: ['http://localhost:5173'],
+    origin: "*",
     methods: ["GET", "POST"],
     credentials: true
   }
