@@ -34,6 +34,7 @@ async function authMiddleware(req, res, next) {
         // 4. Convert to ObjectId and find the user
         const user = await User.findById(new mongoose.Types.ObjectId(decoded.userId));
 
+        
         if (!user) {
             console.error(`User not found for ID: ${decoded.userId}`);
             return res.status(404).json({ error: "User not found" });
