@@ -18,6 +18,7 @@ const path = require('path');
 const Trie = require('./trie');
 const { log } = require("node:console");
 const Group = require("./models/Group");
+
 const trie = new Trie()
 const suggestedWord = path.resolve(__dirname, './suggested.json')
 fs.readFile(suggestedWord, 'utf-8', (err, data) => {
@@ -35,35 +36,16 @@ fs.readFile(suggestedWord, 'utf-8', (err, data) => {
   words.forEach(word => trie.insert(word))
 })
 
-// app.use(cors({
-//   // origin: process.env.NODE_ENV === 'development'
-//   //     ? 'https://merchantcoin.shop' // Vite dev server
-//   //     : 'app://./' ,// Electron production
-
-//   // curl -i -X OPTIONS http://localhost:3000/ -H "Origin: https://merchantcoin.shop
-//   origin: ['https://merchantcoin.shop'],
-//   methods: ['GET', 'POST', 'OPTIONS'],
-//   credentials: true
-// }));
-
-app.use((req, res, next) => {
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
-
 app.use(cors({
-  origin: (origin, callback) => {
-    callback(null, true); 
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+  // origin: process.env.NODE_ENV === 'development'
+  //     ? 'http://localhost:5173' // Vite dev server
+  //     : 'app://./' ,// Electron production
 
-// handle preflight
-app.options('*', cors());
+  // curl -i -X OPTIONS http://localhost:3000/ -H "Origin: http://localhost:5173
+  origin: ['http://localhost:5173'],
+  methods: ['GET', 'POST', 'OPTIONS'],
+  credentials: true
+}));
 
 
 // JWT_SECRET
@@ -88,19 +70,14 @@ app.use(cookieParser());
  * @param {import('express').Response} res - Express response object.
  * @returns {void} 200 with JSON if authenticated, 500 on error.
  */
-app.get('/', (req, res) => {
-  res.json({
-    message: "Server root working ✅",
-  });
-});
-// app.get('/', authMiddleware, (req, res) => {
-//   try {
-//     res.json({ '/': 'Authenticated User' })
-//   } catch (error) {
-//     res.status(500).json({ message: 'Error fetching user', error: error.message });
+app.get('/', authMiddleware, (req, res) => {
+  try {
+    res.json({ '/': 'Authenticated User' })
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching user', error: error.message });
 
-//   }
-// })
+  }
+})
 
 
 /**
@@ -238,7 +215,7 @@ app.post('/', async (req, res) => {
  *   404: User not found
  *
  * Success:
- *   Redirects to /chats (https://merchantcoin.shop/chats) after sending or if already sent/friends.
+ *   Redirects to /chats (http://localhost:5173/chats) after sending or if already sent/friends.
  *
  * @route GET /frnd-req/:senderId
  * @middleware authMiddleware
@@ -283,7 +260,7 @@ app.get('/frnd-req/:senderId', authMiddleware, async (req, res) => {
       receiver.friendRequestsReceived.includes(sender._id) ||
       receiver.friends.includes(sender._id)
     ) {
-      // return res.redirect('https://merchantcoin.shop/chats');
+      // return res.redirect('http://localhost:5173/chats');
       return res.json({ success: true, message: "Request sent" });
     }
 
@@ -294,7 +271,7 @@ app.get('/frnd-req/:senderId', authMiddleware, async (req, res) => {
     await receiver.save();
     await sender.save();
 
-    // return res.redirect('https://merchantcoin.shop/chats');
+    // return res.redirect('http://localhost:5173/chats');
     return res.json({ success: true, message: "Request sent" });
 
   } catch (err) {
@@ -681,20 +658,10 @@ app.get('/groups/:groupId/messages', authMiddleware, async (req, res) => {
   }
 });
 
-
-
 const server = createServer(app);
 // const io = new Server(server, {
 //   cors: {
-//     origin: ['https://merchantcoin.shop', 'http://localhost:3000'],
-//     methods: ["GET", "POST"],
-//     credentials: true
-//   }
-// });
-
-// const io = new Server(server, {
-//   cors: {
-//     origin: ['https://merchantcoin.shop'],
+//     origin: ['http://localhost:5173', 'http://localhost:3000'],
 //     methods: ["GET", "POST"],
 //     credentials: true
 //   }
@@ -702,7 +669,7 @@ const server = createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "*", // socket allows this
+    origin: ['http://localhost:5173'],
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -1227,8 +1194,6 @@ function createRoomName(userId1, userId2) {
   return [userId1, userId2].sort().join('_');
 }
 
-const PORT = process.env.PORT || 8000;
-
-server.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+server.listen(8000, () => {
+  console.log('Server running at http://localhost:8000');
 });
