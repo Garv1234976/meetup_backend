@@ -88,14 +88,19 @@ app.use(cookieParser());
  * @param {import('express').Response} res - Express response object.
  * @returns {void} 200 with JSON if authenticated, 500 on error.
  */
-app.get('/', authMiddleware, (req, res) => {
-  try {
-    res.json({ '/': 'Authenticated User' })
-  } catch (error) {
-    res.status(500).json({ message: 'Error fetching user', error: error.message });
+app.get('/', (req, res) => {
+  res.json({
+    message: "Server root working ✅",
+  });
+});
+// app.get('/', authMiddleware, (req, res) => {
+//   try {
+//     res.json({ '/': 'Authenticated User' })
+//   } catch (error) {
+//     res.status(500).json({ message: 'Error fetching user', error: error.message });
 
-  }
-})
+//   }
+// })
 
 
 /**
