@@ -369,6 +369,90 @@ app.post('/frnd-req/:senderId/accept', authMiddleware, async (req, res) => {
   }
 });
 
+app.post('/frnd-req/acceptall', authMiddleware, async (req, res) => {
+  try {
+    const receiverId = req.user.userId;
+
+    const receiver = await User.findById(receiverId);
+
+    if (!receiver) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const senderIds = receiver.friendRequestsReceived;
+
+    if (!senderIds.length) {
+      return res.status(400).json({ message: "No pending requests" });
+    }
+
+    // 🔥 Fetch all senders
+    const senders = await User.find({ _id: { $in: senderIds } });
+
+    // 🔥 CREATE CHATS IN PARALLEL
+    const chatPromises = senderIds.map(async (senderId) => {
+      let chat = await Chat.findOne({
+        participants: { $all: [senderId, receiverId], $size: 2 },
+      });
+
+      if (!chat) {
+        chat = await Chat.create({
+          participants: [senderId, receiverId],
+          messages: [],
+        });
+      }
+
+      return { senderId, chatId: chat._id };
+    });
+
+    const chatResults = await Promise.all(chatPromises);
+
+    // 🔥 BULK UPDATE SENDERS
+    const senderBulk = senders.map((sender) => {
+      const chat = chatResults.find(
+        (c) => c.senderId.toString() === sender._id.toString()
+      );
+
+      return {
+        updateOne: {
+          filter: { _id: sender._id },
+          update: {
+            $addToSet: {
+              friends: receiverId,
+              chats: chat.chatId,
+            },
+            $pull: {
+              friendRequestsSent: receiverId,
+            },
+          },
+        },
+      };
+    });
+
+    await User.bulkWrite(senderBulk);
+
+    // 🔥 UPDATE RECEIVER
+    receiver.friends.push(...senderIds);
+
+    receiver.friendRequestsReceived = [];
+
+    chatResults.forEach((c) => {
+      if (!receiver.chats.includes(c.chatId)) {
+        receiver.chats.push(c.chatId);
+      }
+    });
+
+    await receiver.save();
+
+    return res.status(200).json({
+      message: "All requests accepted",
+      count: senderIds.length,
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
 /**
  * POST /frnd-req/:senderId/decline
