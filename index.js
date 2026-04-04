@@ -1035,6 +1035,11 @@ ConnectionSocket.on("react_group_message", async ({ messageId, emoji, userId }) 
 
 ConnectionSocket.on("send_broadcast", async ({ recipients, text }) => {
   try {
+          if (!recipients || recipients.length === 0) {
+        return ConnectionSocket.emit("error", {
+          message: "No recipients provided",
+        });
+      }
     const sender = await User.findById(userId);
 
     const validRecipients = recipients.filter((id) =>
